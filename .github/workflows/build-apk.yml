@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout source code
@@ -23,20 +23,53 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
+      - name: Check Android SDK
+        shell: bash
         run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          ls -la "$SDK"
+          ls -la "$SDK/platforms"
+          ls -la "$SDK/build-tools"
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          SDK="$ANDROID_HOME"
+
+          if [ -d "$SDK/platforms/android-35" ] && [ -d "$SDK/build-tools/35.0.0" ]; then
+            echo "Required Android SDK is already installed."
+          else
+            SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+
+            if [ -z "$SDKMANAGER" ]; then
+              echo "ERROR: sdkmanager not found"
+              exit 1
+            fi
+
+            echo "Using $SDKMANAGER"
+            yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses || true
+
+            "$SDKMANAGER" --sdk_root="$SDK" \
+              "platforms;android-35" \
+              "build-tools;35.0.0"
+          fi
+
+          echo "sdk.dir=$SDK" > local.properties
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      - name: Check Gradle
+        run: gradle --version
+
       - name: Build APK
-        run: gradle assembleDebug --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Rename APK
         run: |
